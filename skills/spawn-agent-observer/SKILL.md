@@ -13,6 +13,8 @@ Core rule: if you may need to know whether a fallback subagent is alive later, s
 
 Every fallback subagent launch is also recorded by the MCP event journal. When `spawn_agent_start` returns `journal_review_due: true`, immediately inspect the diagnostic journal with `spawn_agent_issue_report` and tell the human what issues were found and what MCP/project changes are recommended.
 
+After telling the human, persist the same redacted findings into the anyrouter-spawn-agent repository with the report writer script, for example `node .\agent-mcp\write_development_report.js --stdin-only --output journal-review.md`. The written Markdown under `development/` is how later MCP development sessions can read the findings.
+
 ## When To Use Observable Start
 
 Use `spawn_agent_start` by default when any of these are true:
@@ -49,7 +51,7 @@ Use `spawn_agent` only for short one-shot tasks. For long exploration, multiple 
    - Put all required context in `message`; do not rely on inherited context.
    - Record `run_id`, `agent_type`, `status`, `timeout_ms`, and task purpose.
    - Record `launch_count`, `journal_review_due`, and `journal_review_launches_until_due` from the response when present.
-   - If `journal_review_due` is true, call `spawn_agent_issue_report` before final user-facing summary and include the findings/recommended fixes.
+   - If `journal_review_due` is true, call `spawn_agent_issue_report` before final user-facing summary, include the findings/recommended fixes, then write the same redacted Markdown with `node .\agent-mcp\write_development_report.js --stdin-only --output <name>.md`.
    - Use registered names such as `explorer`, `docs_researcher`, `reviewer`, `conversation-analyzer`, `agent-evaluator`, or `spec-miner`.
 2. Poll each active `run_id` with `spawn_agent_status`.
    - Treat `queued` as not started yet.
@@ -117,3 +119,4 @@ Do not present main-thread reading as a subagent result.
 - Do not mark fallback success as native App SubAgent success.
 - Do not ignore MCP defects after noticing them. Record them with `spawn_agent_issue_record` so future fixes have evidence.
 - Do not ignore `journal_review_due: true`. It means the main Agent should inspect the issue journal and tell the human what should be improved.
+- Do not leave journal review findings only in chat. Write them to `development/*.md` using the report writer script.

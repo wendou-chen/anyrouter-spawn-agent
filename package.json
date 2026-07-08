@@ -5,8 +5,9 @@
   "description": "Observable spawn_agent MCP fallback for Codex sessions where AnyRouter/API routing hides native Sub Agents.",
   "type": "commonjs",
   "scripts": {
-    "test": "node --test agent-mcp/spawn_agent_server.test.js",
-    "check": "node --check agent-mcp/spawn_agent_server.js"
+    "test": "node --test agent-mcp/spawn_agent_server.test.js agent-mcp/write_development_report.test.js",
+    "check": "node --check agent-mcp/spawn_agent_server.js && node --check agent-mcp/write_development_report.js",
+    "report:issues": "node agent-mcp/write_development_report.js"
   },
   "engines": {
     "node": ">=18"
