@@ -14,11 +14,12 @@
 ## Recommended Changes Implemented
 - Add agent-mcp/write_development_report.js, a Node script that writes redacted Markdown into development/*.md.
 - Add agent-mcp/write_development_report.test.js with coverage for writing reports, path safety, .md enforcement, journal-based generation, redaction, and empty stdin-only rejection.
-- Add npm run report:issues as the stable no-argument command for journal-generated reports.
+- Add skills/spawn-agent/scripts/write_development_report.js as the global skill wrapper, so other projects can call the report writer from the user's .codex skill installation.
+- Add npm run report:issues as the repository-local no-argument command for journal-generated reports.
 - Update README, AGENTS, examples, and spawn-agent skills so future main Agents report findings to the human and then write the same redacted findings into development/.
 
 ## Usage
-- Main-Agent-authored report: node agent-mcp/write_development_report.js --stdin-only --output journal-review.md
+- Main-Agent-authored report from any project root: node "$env:USERPROFILE\.codex\skills\spawn-agent\scripts\write_development_report.js" --stdin-only --output journal-review.md
 - Default journal-generated report: npm run report:issues
 
 ## Follow-up Risks

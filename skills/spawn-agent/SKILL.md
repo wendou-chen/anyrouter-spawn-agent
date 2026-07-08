@@ -47,7 +47,7 @@ The diagnostic journal is persistent by default under `$CODEX_HOME/spawn-agent-l
 
 Every 20 fallback subagent launches, the main Agent should inspect the journal with `spawn_agent_issue_report` and report the issues plus recommended MCP/project fixes to the human.
 
-After reporting those findings, write the same redacted Markdown into the anyrouter-spawn-agent repository with `node .\agent-mcp\write_development_report.js --stdin-only --output <name>.md`, so future MCP development sessions can read `development/*.md`.
+After reporting those findings, write the same redacted Markdown into the target repository with `node "$env:USERPROFILE\.codex\skills\spawn-agent\scripts\write_development_report.js" --stdin-only --output <name>.md` from that repository root, so future MCP development sessions can read `development/*.md`.
 
 PowerShell example:
 

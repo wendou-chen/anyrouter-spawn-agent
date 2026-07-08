@@ -174,7 +174,7 @@ function buildDevelopmentReport(options = {}) {
 }
 
 function writeDevelopmentReport(options = {}) {
-  const repoRoot = path.resolve(options.repoRoot || path.join(__dirname, ".."));
+  const repoRoot = path.resolve(options.repoRoot || process.cwd());
   const outputPath = resolveOutputPath(repoRoot, options.output);
   const hasInputMarkdown = typeof options.inputMarkdown === "string" && options.inputMarkdown.trim().length > 0;
 
@@ -266,6 +266,7 @@ module.exports = {
   readJsonl,
   redactSensitiveText,
   resolveOutputPath,
+  main,
   writeDevelopmentReport,
 };
 

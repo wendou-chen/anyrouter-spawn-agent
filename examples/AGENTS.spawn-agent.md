@@ -13,4 +13,4 @@
 - Every fallback subagent launch is recorded in the MCP event journal. Track `launch_count` and `journal_review_due` from `spawn_agent_start` responses when present.
 - When `journal_review_due: true` appears, call `spawn_agent_issue_report` and tell the human what recurring issues were found and what MCP/project changes are recommended.
 - Legacy synchronous `spawn_agent` launches are also recorded as fallback launches with `run_id: "legacy/no_run_id"` and count toward the 20-launch review interval.
-- After reporting journal review findings to the human, write the same redacted findings into this repository with `node .\agent-mcp\write_development_report.js --stdin-only --output <name>.md` so MCP development sessions can read `development/*.md`.
+- After reporting journal review findings to the human, write the same redacted findings into the target repository with `node "$env:USERPROFILE\.codex\skills\spawn-agent\scripts\write_development_report.js" --stdin-only --output <name>.md` from that repository root so MCP development sessions can read `development/*.md`.

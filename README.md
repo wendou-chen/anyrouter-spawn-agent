@@ -62,7 +62,7 @@ Every 20 fallback launches, `spawn_agent_start` returns `journal_review_due: tru
 After reporting to the human, the main Agent should persist the same redacted findings into this repository's development directory. Use the report writer script:
 
 ```powershell
-node .\agent-mcp\write_development_report.js --limit 20 --output spawn-agent-diagnostic-report.md
+node "$env:USERPROFILE\.codex\skills\spawn-agent\scripts\write_development_report.js" --limit 20 --output spawn-agent-diagnostic-report.md
 ```
 
 The default output is:
@@ -82,7 +82,7 @@ The script can also write main-agent-authored Markdown from stdin:
 
 ## Recommended Changes
 - ...
-'@ | node .\agent-mcp\write_development_report.js --stdin-only --output journal-review.md
+'@ | node "$env:USERPROFILE\.codex\skills\spawn-agent\scripts\write_development_report.js" --stdin-only --output journal-review.md
 ```
 
 For safety, output paths must stay inside `development/` and must end in `.md`. The script redacts common bearer tokens, `sk-...` keys, GitHub PATs, and `token/api_key/password` assignments before writing.
@@ -168,7 +168,7 @@ Use this decision flow:
 5. Use legacy `spawn_agent` only for short one-shot requests where progress does not matter.
 6. If the fallback mechanism misbehaves or produces a partial/failed result worth improving, call `spawn_agent_issue_record` or include the automatic issue in a `spawn_agent_issue_report`.
 7. When a launch response says `journal_review_due: true`, call `spawn_agent_issue_report` and report the issue summary plus recommended fixes to the human.
-8. Persist the same review findings with `node .\agent-mcp\write_development_report.js --stdin-only --output <name>.md` so future MCP development inside this repository can read the Markdown report. Use `npm run report:issues` only for the default no-argument journal-generated report.
+8. Persist the same review findings with `node "$env:USERPROFILE\.codex\skills\spawn-agent\scripts\write_development_report.js" --stdin-only --output <name>.md` from the target project root so future MCP development inside that repository can read the Markdown report. In this repository, `npm run report:issues` is a no-argument shortcut.
 
 ## Example
 
