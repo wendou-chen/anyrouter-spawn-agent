@@ -51,6 +51,14 @@ Set `SPAWN_AGENT_LOG_DIR` to place the journal somewhere else.
 
 The journal is intentionally redacted by default. It stores metadata and short previews such as `run_id`, `agent_type`, `status`, `tool`, `error`, `timeout_ms`, `idle_ms`, and `message_preview`. It does not copy full parent prompts, final answers, stdout tails, or stderr tails unless a caller explicitly writes a short note.
 
+Launch accounting is also written to `events.jsonl`. Every fallback subagent launch records a `fallback_launch_recorded` event:
+
+- Observable `spawn_agent_start` launches record their real `run_id`.
+- Legacy synchronous `spawn_agent` launches record `run_id: "legacy/no_run_id"` and keep the old response shape.
+- The counter is derived from the persistent event journal, so it can survive MCP server restarts as long as the log files remain.
+
+Every 20 fallback launches, `spawn_agent_start` returns `journal_review_due: true` plus `journal_review_recommended_tool: "spawn_agent_issue_report"` in `structuredContent`, and the response text includes `journal review due`. The main Agent should then inspect the issue journal and tell the human what recurring MCP issues were found and what changes are recommended.
+
 Issues are recorded automatically for:
 
 - `failed`, `timed_out`, and `cancelled` jobs.
@@ -131,6 +139,7 @@ Use this decision flow:
 4. Use `spawn_agent_status` while the job runs and `spawn_agent_result` when it completes.
 5. Use legacy `spawn_agent` only for short one-shot requests where progress does not matter.
 6. If the fallback mechanism misbehaves or produces a partial/failed result worth improving, call `spawn_agent_issue_record` or include the automatic issue in a `spawn_agent_issue_report`.
+7. When a launch response says `journal_review_due: true`, call `spawn_agent_issue_report` and report the issue summary plus recommended fixes to the human.
 
 ## Example
 

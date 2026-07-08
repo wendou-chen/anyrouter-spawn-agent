@@ -11,6 +11,8 @@ Use this skill to coordinate observable `spawn_agent` fallback jobs through MCP 
 
 Core rule: if you may need to know whether a fallback subagent is alive later, start it observably and keep a run ledger. Every started job must have a `run_id`, current status, last activity, and final result or cancellation reason before you summarize it.
 
+Every fallback subagent launch is also recorded by the MCP event journal. When `spawn_agent_start` returns `journal_review_due: true`, immediately inspect the diagnostic journal with `spawn_agent_issue_report` and tell the human what issues were found and what MCP/project changes are recommended.
+
 ## When To Use Observable Start
 
 Use `spawn_agent_start` by default when any of these are true:
@@ -46,6 +48,8 @@ Use `spawn_agent` only for short one-shot tasks. For long exploration, multiple 
 1. Start each subagent with `spawn_agent_start`.
    - Put all required context in `message`; do not rely on inherited context.
    - Record `run_id`, `agent_type`, `status`, `timeout_ms`, and task purpose.
+   - Record `launch_count`, `journal_review_due`, and `journal_review_launches_until_due` from the response when present.
+   - If `journal_review_due` is true, call `spawn_agent_issue_report` before final user-facing summary and include the findings/recommended fixes.
    - Use registered names such as `explorer`, `docs_researcher`, `reviewer`, `conversation-analyzer`, `agent-evaluator`, or `spec-miner`.
 2. Poll each active `run_id` with `spawn_agent_status`.
    - Treat `queued` as not started yet.
@@ -68,7 +72,9 @@ Automatic issue records may already exist for failed, timed out, cancelled, firs
 The journal is fallback-only observability, not native App Sub Agent telemetry. It writes redacted JSONL under `$CODEX_HOME/spawn-agent-logs/` by default:
 
 - `issues.jsonl`: persistent problem records for later improvement.
-- `events.jsonl`: lightweight journal events.
+- `events.jsonl`: lightweight journal events, including one `fallback_launch_recorded` event for every fallback subagent launch.
+
+Launch accounting is persistent while the log files remain. Observable `spawn_agent_start` launches record a real `run_id`; legacy `spawn_agent` launches record `run_id: "legacy/no_run_id"` and still count toward the 20-launch review interval. The review interval is a prompt to inspect and report, not an automatic code modification.
 
 Issue records should be short and safe. Prefer metadata, summaries, and short previews. Do not paste full prompts, full answers, stdout tails, stderr tails, API keys, bearer tokens, or private credentials into `notes`.
 
@@ -110,3 +116,4 @@ Do not present main-thread reading as a subagent result.
 - Do not treat `possibly_stalled` as failure by itself.
 - Do not mark fallback success as native App SubAgent success.
 - Do not ignore MCP defects after noticing them. Record them with `spawn_agent_issue_record` so future fixes have evidence.
+- Do not ignore `journal_review_due: true`. It means the main Agent should inspect the issue journal and tell the human what should be improved.

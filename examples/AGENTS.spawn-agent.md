@@ -10,3 +10,6 @@
 - When the fallback MCP misbehaves, times out, returns partial output, exposes a missing capability, or creates a repeated workflow problem, record a redacted diagnostic issue with `spawn_agent_issue_record`.
 - Before debugging recurring fallback MCP problems, inspect `spawn_agent_issue_list` or generate `spawn_agent_issue_report`.
 - Do not put full prompts, full answers, stdout/stderr tails, tokens, or credentials in diagnostic issue notes.
+- Every fallback subagent launch is recorded in the MCP event journal. Track `launch_count` and `journal_review_due` from `spawn_agent_start` responses when present.
+- When `journal_review_due: true` appears, call `spawn_agent_issue_report` and tell the human what recurring issues were found and what MCP/project changes are recommended.
+- Legacy synchronous `spawn_agent` launches are also recorded as fallback launches with `run_id: "legacy/no_run_id"` and count toward the 20-launch review interval.

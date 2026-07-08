@@ -24,6 +24,7 @@ Registered agents:
 3. Run the script with the exact requested `agent_type`.
 4. Treat success as: the command exits 0, returns a child `thread_id`, and the answer reflects that agent's constraints.
 5. If the command fails, report the stderr summary and do not pretend the agent ran.
+6. This legacy path is still a fallback subagent launch. It is recorded in the MCP event journal with `run_id: "legacy/no_run_id"` and counts toward the 20-launch diagnostic review interval.
 
 ## Observable MCP Jobs
 
@@ -43,6 +44,8 @@ For coordinating or monitoring multiple observable jobs, use the `spawn-agent-ob
 These observable jobs are still fallback `codex exec` children, not Codex App native Sub Agents, and they do not appear in the App sidebar. Job state is in-memory only and is lost if the MCP server restarts. A running job is marked `possibly_stalled` after five minutes without stdout or stderr activity; this is only a hint, not automatic cancellation.
 
 The diagnostic journal is persistent by default under `$CODEX_HOME/spawn-agent-logs/`. If this fallback path fails, times out, returns partial output, behaves unexpectedly, or reveals a workflow gap, record a short redacted issue through `spawn_agent_issue_record` or switch to `spawn-agent-observer` for coordinated monitoring. Do not store full prompts, full answers, stdout/stderr tails, tokens, or credentials in issue notes.
+
+Every 20 fallback subagent launches, the main Agent should inspect the journal with `spawn_agent_issue_report` and report the issues plus recommended MCP/project fixes to the human.
 
 PowerShell example:
 

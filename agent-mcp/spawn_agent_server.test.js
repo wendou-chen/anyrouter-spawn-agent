@@ -143,6 +143,47 @@ test("tools/call delegates to the injected Codex runner with the loaded agent", 
   assert.match(response.result.content[0].text, /READY/);
 });
 
+test("legacy spawn_agent records a fallback launch event without changing the old response shape", async () => {
+  const codexHome = makeCodexHome();
+  const logDir = makeLogDir();
+  const registry = server.createJobRegistry({ logDir });
+
+  const response = await server.handleJsonRpcMessage(
+    {
+      jsonrpc: "2.0",
+      id: 12,
+      method: "tools/call",
+      params: {
+        name: "spawn_agent",
+        arguments: {
+          agent_type: "explorer",
+          message: "Short one-shot.",
+        },
+      },
+    },
+    {
+      codexHome,
+      registry,
+      runCodexAgent: async () => ({
+        agent_type: "explorer",
+        ok: true,
+        answer: "READY",
+      }),
+    },
+  );
+
+  assert.equal(response.result.isError, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(response.result, "structuredContent"), false);
+
+  const events = readJsonl(path.join(logDir, "events.jsonl"));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "fallback_launch_recorded");
+  assert.equal(events[0].launch_count, 1);
+  assert.equal(events[0].agent_type, "explorer");
+  assert.equal(events[0].tool, "spawn_agent");
+  assert.equal(events[0].run_id, "legacy/no_run_id");
+});
+
 test("spawn_agent_start returns a run id and exposes running status", async () => {
   const codexHome = makeCodexHome();
   const registry = server.createJobRegistry({ now: () => new Date("2026-07-07T00:00:00.000Z") });
@@ -208,6 +249,114 @@ test("spawn_agent_start returns a run id and exposes running status", async () =
     stderr: "",
     raw_event_count: 3,
   });
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test("spawn_agent_start records every fallback launch in the diagnostic event journal", async () => {
+  const codexHome = makeCodexHome();
+  const logDir = makeLogDir();
+  const registry = server.createJobRegistry({
+    now: () => new Date("2026-07-07T00:00:00.000Z"),
+    logDir,
+  });
+
+  const response = await server.handleJsonRpcMessage(
+    {
+      jsonrpc: "2.0",
+      id: 25,
+      method: "tools/call",
+      params: {
+        name: "spawn_agent_start",
+        arguments: {
+          agent_type: "explorer",
+          message: "Record this launch.",
+          timeout_ms: 900000,
+        },
+      },
+    },
+    {
+      codexHome,
+      registry,
+      runCodexAgent: async () => ({ agent_type: "explorer", ok: true, answer: "DONE" }),
+    },
+  );
+
+  const structured = response.result.structuredContent;
+  assert.equal(structured.launch_count, 1);
+  assert.equal(structured.journal_review_interval, 20);
+  assert.equal(structured.journal_review_due, false);
+  assert.equal(structured.journal_review_launches_until_due, 19);
+
+  const events = readJsonl(path.join(logDir, "events.jsonl"));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "fallback_launch_recorded");
+  assert.equal(events[0].launch_count, 1);
+  assert.equal(events[0].run_id, structured.run_id);
+  assert.equal(events[0].agent_type, "explorer");
+  assert.equal(events[0].tool, "spawn_agent_start");
+  assert.equal(Object.prototype.hasOwnProperty.call(events[0], "message"), false);
+
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test("spawn_agent_start marks every twentieth fallback launch as journal review due", async () => {
+  const codexHome = makeCodexHome();
+  const logDir = makeLogDir();
+  const eventsPath = path.join(logDir, "events.jsonl");
+  fs.mkdirSync(logDir, { recursive: true });
+  for (let count = 1; count <= 19; count += 1) {
+    fs.appendFileSync(
+      eventsPath,
+      `${JSON.stringify({
+        ts: "2026-07-07T00:00:00.000Z",
+        event: "fallback_launch_recorded",
+        launch_count: count,
+        run_id: `run_seed_${count}`,
+        agent_type: "explorer",
+        tool: "spawn_agent_start",
+      })}${os.EOL}`,
+      "utf8",
+    );
+  }
+  const registry = server.createJobRegistry({
+    now: () => new Date("2026-07-07T00:00:20.000Z"),
+    logDir,
+  });
+
+  const response = await server.handleJsonRpcMessage(
+    {
+      jsonrpc: "2.0",
+      id: 26,
+      method: "tools/call",
+      params: {
+        name: "spawn_agent_start",
+        arguments: {
+          agent_type: "explorer",
+          message: "This is the twentieth launch.",
+        },
+      },
+    },
+    {
+      codexHome,
+      registry,
+      runCodexAgent: async () => ({ agent_type: "explorer", ok: true, answer: "DONE" }),
+    },
+  );
+
+  const structured = response.result.structuredContent;
+  assert.equal(structured.launch_count, 20);
+  assert.equal(structured.journal_review_due, true);
+  assert.equal(structured.journal_review_launches_until_due, 0);
+  assert.equal(structured.journal_review_recommended_tool, "spawn_agent_issue_report");
+  assert.deepEqual(structured.journal_review_recommended_arguments, { limit: 20 });
+  assert.match(response.result.content[0].text, /journal review due/i);
+
+  const events = readJsonl(eventsPath);
+  assert.equal(events.length, 20);
+  assert.equal(events[19].event, "fallback_launch_recorded");
+  assert.equal(events[19].launch_count, 20);
+  assert.equal(events[19].journal_review_due, true);
+
   await new Promise((resolve) => setImmediate(resolve));
 });
 

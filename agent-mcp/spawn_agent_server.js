@@ -14,6 +14,7 @@ const DEFAULT_POLL_AFTER_MS = 2000;
 const DEFAULT_ISSUE_LIMIT = 20;
 const ISSUE_PREVIEW_MAX_LENGTH = 240;
 const ISSUE_NOTES_MAX_LENGTH = 2000;
+const JOURNAL_REVIEW_INTERVAL = 20;
 
 let activeCodexAgentRuns = 0;
 const queuedCodexAgentRuns = [];
@@ -440,6 +441,61 @@ function recordDiagnosticIssue(registry, input = {}) {
     severity: issue.severity,
   });
   return issue;
+}
+
+function countRecordedLaunches(registry) {
+  const logDir = defaultIssueLogDir(registry);
+  return readJsonl(path.join(logDir, "events.jsonl")).filter((event) => event.event === "fallback_launch_recorded").length;
+}
+
+function buildJournalReviewMetadata(launchCount) {
+  const due = launchCount > 0 && launchCount % JOURNAL_REVIEW_INTERVAL === 0;
+  return {
+    launch_count: launchCount,
+    launch_count_scope: "persistent_event_journal",
+    launch_count_includes: "fallback_spawn_agent_start_jobs",
+    journal_review_interval: JOURNAL_REVIEW_INTERVAL,
+    journal_review_due: due,
+    journal_review_launches_until_due: due ? 0 : JOURNAL_REVIEW_INTERVAL - (launchCount % JOURNAL_REVIEW_INTERVAL),
+    journal_review_recommended_tool: "spawn_agent_issue_report",
+    journal_review_recommended_arguments: { limit: DEFAULT_ISSUE_LIMIT },
+  };
+}
+
+function recordFallbackLaunch(registry, input = {}) {
+  const launchCount = countRecordedLaunches(registry) + 1;
+  const review = buildJournalReviewMetadata(launchCount);
+  const event = compactObject({
+    ts: nowIso(registry),
+    event: "fallback_launch_recorded",
+    launch_count: launchCount,
+    run_id: input.run_id,
+    agent_type: input.agent_type,
+    tool: input.tool || "spawn_agent_start",
+    status: input.status,
+    cwd: input.cwd,
+    timeout_ms: input.timeout_ms,
+    message_preview: input.message_preview ? truncateText(input.message_preview, ISSUE_PREVIEW_MAX_LENGTH) : undefined,
+    fallback_mode: input.fallback_mode || "detached_codex_exec",
+    native_subagent: false,
+    app_ui_visible: false,
+    journal_review_due: review.journal_review_due,
+    journal_review_interval: review.journal_review_interval,
+  });
+  appendJsonl(path.join(defaultIssueLogDir(registry), "events.jsonl"), event);
+  return { launch_recorded: true, ...review };
+}
+
+function tryRecordFallbackLaunch(registry, input = {}) {
+  try {
+    return recordFallbackLaunch(registry, input);
+  } catch (error) {
+    return {
+      launch_recorded: false,
+      launch_record_error: error.message,
+      ...buildJournalReviewMetadata(0),
+    };
+  }
 }
 
 function tryRecordDiagnosticIssue(registry, input = {}) {
@@ -1178,6 +1234,15 @@ async function handleJsonRpcMessage(message, options = {}) {
         }
         const agent = loadAgentDefinition(args.agent_type, options);
         const runner = options.runCodexAgent || runCodexAgent;
+        tryRecordFallbackLaunch(registry, {
+          run_id: "legacy/no_run_id",
+          agent_type: agent.agentType,
+          status: "started",
+          cwd: options.cwd || process.cwd(),
+          timeout_ms: normalizeTimeoutMs(args.timeout_ms),
+          message_preview: truncateText(args.message, 240),
+          tool: params.name,
+        });
         const result = await runWithCodexAgentRunSlot(agent.maxThreads, () =>
           runner(agent, args.message, {
             timeoutMs: args.timeout_ms,
@@ -1202,6 +1267,15 @@ async function handleJsonRpcMessage(message, options = {}) {
           registry,
           runCodexAgent: options.runCodexAgent,
         });
+        const launchMetadata = tryRecordFallbackLaunch(registry, {
+          run_id: job.run_id,
+          agent_type: job.agent_type,
+          status: job.status,
+          cwd: job.cwd,
+          timeout_ms: job.timeout_ms,
+          message_preview: job.message_preview,
+          tool: params.name,
+        });
         const structured = {
           ok: true,
           run_id: job.run_id,
@@ -1211,10 +1285,16 @@ async function handleJsonRpcMessage(message, options = {}) {
           timeout_ms: job.timeout_ms,
           poll_after_ms: DEFAULT_POLL_AFTER_MS,
           fallback_mode: "detached_codex_exec",
+          ...launchMetadata,
         };
         return jsonRpcResult(
           message.id,
-          toolResult(`spawn_agent job ${job.run_id} queued for ${job.agent_type}`, structured),
+          toolResult(
+            launchMetadata.journal_review_due
+              ? `spawn_agent job ${job.run_id} queued for ${job.agent_type}; journal review due`
+              : `spawn_agent job ${job.run_id} queued for ${job.agent_type}`,
+            structured,
+          ),
         );
       }
 
