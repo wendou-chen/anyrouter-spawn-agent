@@ -1,0 +1,43 @@
+# Add these snippets to C:\Users\<you>\.codex\config.toml.
+# Adjust absolute paths if your CODEX_HOME or Node.js installation differs.
+
+[features]
+multi_agent = false
+multi_agent_v2 = false
+
+[agents]
+max_threads = 10
+max_depth = 1
+
+[agents.explorer]
+description = "Read-only Codex agent for tracing real paths, configuration, and execution flow before fixes."
+config_file = "agents/explorer.toml"
+
+[agents.reviewer]
+description = "Read-only Codex agent for owner-style review of correctness, regressions, security, and test gaps."
+config_file = "agents/reviewer.toml"
+
+[agents.docs_researcher]
+description = "Read-only Codex agent for verifying Codex, API, framework, and release claims against primary sources."
+config_file = "agents/docs-researcher.toml"
+
+[agents.conversation-analyzer]
+description = "Read-only Codex agent for analyzing repeated conversation patterns worth solidifying into hooks or skill rules."
+config_file = "agents/conversation-analyzer.toml"
+
+[agents.agent-evaluator]
+description = "Read-only Codex agent for scoring live skill output quality after evolution proposals are applied."
+config_file = "agents/agent-evaluator.toml"
+
+[agents.spec-miner]
+description = "Codex agent for mining requirements and invariants from live skill documents into .learning/specs."
+config_file = "agents/spec-miner.toml"
+
+[mcp_servers.spawn_agent]
+type = "stdio"
+command = 'C:\Program Files\nodejs\node.exe'
+args = ['C:\Users\<you>\.codex\agent-mcp\spawn_agent_server.js']
+startup_timeout_sec = 120
+enabled = true
+enabled_tools = ["spawn_agent", "spawn_agent_start", "spawn_agent_status", "spawn_agent_result", "spawn_agent_list", "spawn_agent_cancel"]
+default_tools_approval_mode = "approve"

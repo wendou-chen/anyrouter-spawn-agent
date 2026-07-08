@@ -1,0 +1,4 @@
+interface:
+  display_name: "Spawn Agent"
+  short_description: "Run local read-only Codex custom agents."
+  default_prompt: "Use explorer to inspect the current Codex setup."
