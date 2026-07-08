@@ -11,6 +11,9 @@ const DEFAULT_MAX_FALLBACK_THREADS = 10;
 const STALLED_THRESHOLD_MS = 300000;
 const JOB_TAIL_MAX_LENGTH = 4000;
 const DEFAULT_POLL_AFTER_MS = 2000;
+const DEFAULT_ISSUE_LIMIT = 20;
+const ISSUE_PREVIEW_MAX_LENGTH = 240;
+const ISSUE_NOTES_MAX_LENGTH = 2000;
 
 let activeCodexAgentRuns = 0;
 const queuedCodexAgentRuns = [];
@@ -19,6 +22,9 @@ function createJobRegistry(options = {}) {
   return {
     runs: new Map(),
     nextId: 1,
+    nextIssueId: 1,
+    loggedStalls: new Set(),
+    logDir: options.logDir || null,
     now: options.now || (() => new Date()),
   };
 }
@@ -27,6 +33,11 @@ const defaultJobRegistry = createJobRegistry();
 
 function defaultCodexHome() {
   return process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+}
+
+function defaultIssueLogDir(registry = null) {
+  if (registry && registry.logDir) return registry.logDir;
+  return process.env.SPAWN_AGENT_LOG_DIR || path.join(defaultCodexHome(), "spawn-agent-logs");
 }
 
 function stripInlineComment(value) {
@@ -352,6 +363,125 @@ function truncateText(text, maxLength = 4000) {
   return `${text.slice(0, maxLength)}\n... <truncated ${text.length - maxLength} chars>`;
 }
 
+function appendJsonl(filePath, entry) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.appendFileSync(filePath, `${JSON.stringify(entry)}${os.EOL}`, "utf8");
+}
+
+function readJsonl(filePath) {
+  if (!fs.existsSync(filePath)) return [];
+  return fs
+    .readFileSync(filePath, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+function createIssueId(registry) {
+  const id = `issue_${String(registry.nextIssueId).padStart(6, "0")}`;
+  registry.nextIssueId += 1;
+  return id;
+}
+
+function compactObject(value) {
+  return Object.fromEntries(Object.entries(value).filter(([, entryValue]) => entryValue !== undefined && entryValue !== null && entryValue !== ""));
+}
+
+function buildIssueEntry(registry, input = {}) {
+  const now = nowIso(registry);
+  const messagePreview = input.message_preview || (typeof input.message === "string" ? input.message : "");
+  return compactObject({
+    issue_id: createIssueId(registry),
+    ts: now,
+    event: input.event || "manual_note",
+    severity: input.severity || "info",
+    title: input.title || input.error || input.event || "spawn_agent diagnostic note",
+    run_id: input.run_id,
+    agent_type: input.agent_type,
+    status: input.status,
+    tool: input.tool,
+    request_id: input.request_id,
+    error: input.error ? truncateText(String(input.error), ISSUE_NOTES_MAX_LENGTH) : undefined,
+    exit_code: input.exit_code,
+    signal: input.signal,
+    timed_out: input.timed_out,
+    pid: input.pid,
+    thread_id: input.thread_id,
+    cwd: input.cwd,
+    timeout_ms: input.timeout_ms,
+    idle_ms: input.idle_ms,
+    message_preview: messagePreview ? truncateText(String(messagePreview), ISSUE_PREVIEW_MAX_LENGTH) : undefined,
+    notes: input.notes ? truncateText(String(input.notes), ISSUE_NOTES_MAX_LENGTH) : undefined,
+    fallback_mode: input.fallback_mode || "detached_codex_exec",
+    native_subagent: false,
+    app_ui_visible: false,
+  });
+}
+
+function recordDiagnosticIssue(registry, input = {}) {
+  const issue = buildIssueEntry(registry, input);
+  const logDir = defaultIssueLogDir(registry);
+  appendJsonl(path.join(logDir, "issues.jsonl"), issue);
+  appendJsonl(path.join(logDir, "events.jsonl"), {
+    ts: issue.ts,
+    event: "issue_recorded",
+    issue_id: issue.issue_id,
+    source_event: issue.event,
+    run_id: issue.run_id,
+    agent_type: issue.agent_type,
+    status: issue.status,
+    severity: issue.severity,
+  });
+  return issue;
+}
+
+function tryRecordDiagnosticIssue(registry, input = {}) {
+  try {
+    return recordDiagnosticIssue(registry, input);
+  } catch {
+    return null;
+  }
+}
+
+function readDiagnosticIssues(registry, filters = {}) {
+  const logDir = defaultIssueLogDir(registry);
+  const limit = Math.min(Math.max(Number(filters.limit || DEFAULT_ISSUE_LIMIT), 1), 100);
+  return readJsonl(path.join(logDir, "issues.jsonl"))
+    .filter((issue) => !filters.run_id || issue.run_id === filters.run_id)
+    .filter((issue) => !filters.status || issue.status === filters.status)
+    .filter((issue) => !filters.event || issue.event === filters.event)
+    .slice(-limit)
+    .reverse();
+}
+
+function buildIssueReport(issues) {
+  const counts = issues.reduce((acc, issue) => {
+    const key = issue.event || "unknown";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const lines = ["# Spawn Agent Diagnostic Report", "", `Total issues: ${issues.length}`];
+  if (issues.length) {
+    lines.push("", "## Event Counts");
+    for (const [event, count] of Object.entries(counts).sort()) {
+      lines.push(`- ${event}: ${count}`);
+    }
+    lines.push("", "## Recent Issues");
+    for (const issue of issues) {
+      const scope = [issue.agent_type, issue.run_id, issue.status].filter(Boolean).join(" / ");
+      lines.push(`- ${issue.ts} ${issue.issue_id} [${issue.severity || "info"}] ${issue.title}${scope ? ` (${scope})` : ""}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 function normalizeTimeoutMs(timeoutMs) {
   return Math.min(Math.max(Number(timeoutMs || DEFAULT_TIMEOUT_MS), 1000), MAX_TIMEOUT_MS);
 }
@@ -521,6 +651,26 @@ function finalizeJob(job, result, registry) {
     job.status = "failed";
   } else {
     job.status = "completed";
+  }
+
+  if (job.status === "timed_out" || job.status === "failed") {
+    tryRecordDiagnosticIssue(registry, {
+      event: job.status === "timed_out" ? "job_timed_out" : "job_failed",
+      severity: job.status === "timed_out" ? "warning" : "error",
+      title: `spawn_agent job ${job.status}: ${job.agent_type}`,
+      run_id: job.run_id,
+      agent_type: job.agent_type,
+      status: job.status,
+      error: job.error,
+      exit_code: job.exit_code,
+      signal: job.signal,
+      timed_out: job.timed_out,
+      pid: job.pid,
+      thread_id: job.thread_id,
+      cwd: job.cwd,
+      timeout_ms: job.timeout_ms,
+      message_preview: job.message_preview,
+    });
   }
   return result;
 }
@@ -738,10 +888,39 @@ function cancelJob(job, registry, options = {}) {
   };
 
   if (removeQueuedCodexAgentRun(job)) {
+    tryRecordDiagnosticIssue(registry, {
+      event: "job_cancelled",
+      severity: "info",
+      title: `spawn_agent job cancelled: ${job.agent_type}`,
+      run_id: job.run_id,
+      agent_type: job.agent_type,
+      status: job.status,
+      pid: job.pid,
+      thread_id: job.thread_id,
+      cwd: job.cwd,
+      timeout_ms: job.timeout_ms,
+      message_preview: job.message_preview,
+      tool: "spawn_agent_cancel",
+    });
     return { cancelled: true, status: job.status, method: "queue" };
   }
 
   const killResult = killJobProcess(job, options);
+  tryRecordDiagnosticIssue(registry, {
+    event: "job_cancelled",
+    severity: "info",
+    title: `spawn_agent job cancelled: ${job.agent_type}`,
+    run_id: job.run_id,
+    agent_type: job.agent_type,
+    status: job.status,
+    pid: job.pid,
+    thread_id: job.thread_id,
+    cwd: job.cwd,
+    timeout_ms: job.timeout_ms,
+    message_preview: job.message_preview,
+    tool: "spawn_agent_cancel",
+    notes: `kill method: ${killResult.method}`,
+  });
   return { cancelled: true, status: job.status, method: killResult.method };
 }
 
@@ -856,6 +1035,67 @@ function listDescriptor() {
   };
 }
 
+function issueRecordDescriptor() {
+  return {
+    name: "spawn_agent_issue_record",
+    description:
+      "Record a redacted diagnostic issue for the spawn_agent MCP fallback journal. Use this when a fallback job behaves unexpectedly or needs follow-up.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        event: { type: "string", description: "Short event key, for example manual_note, job_timed_out, or tool_error." },
+        severity: { type: "string", description: "info, warning, or error." },
+        title: { type: "string", description: "Human-readable issue title." },
+        run_id: { type: "string", description: "Related run id, if any." },
+        agent_type: { type: "string", description: "Related agent type, if any." },
+        status: { type: "string", description: "Related job status, if any." },
+        tool: { type: "string", description: "Related MCP tool name, if any." },
+        request_id: { type: "string", description: "Related JSON-RPC request id, if useful." },
+        error: { type: "string", description: "Short error message." },
+        message: { type: "string", description: "Optional sensitive source text; only a short preview is stored." },
+        message_preview: { type: "string", description: "Optional already-redacted message preview." },
+        notes: { type: "string", description: "Short notes or follow-up ideas." },
+      },
+      required: ["event", "title"],
+      additionalProperties: false,
+    },
+  };
+}
+
+function issueListDescriptor() {
+  return {
+    name: "spawn_agent_issue_list",
+    description: "List recent redacted diagnostic issues recorded by the spawn_agent MCP fallback journal.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        run_id: { type: "string", description: "Optional run id filter." },
+        status: { type: "string", description: "Optional job status filter." },
+        event: { type: "string", description: "Optional event key filter." },
+        limit: { type: "integer", minimum: 1, maximum: 100, description: "Maximum issues to return. Defaults to 20." },
+      },
+      additionalProperties: false,
+    },
+  };
+}
+
+function issueReportDescriptor() {
+  return {
+    name: "spawn_agent_issue_report",
+    description: "Build a Markdown summary of recent spawn_agent MCP fallback diagnostic issues.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        run_id: { type: "string", description: "Optional run id filter." },
+        status: { type: "string", description: "Optional job status filter." },
+        event: { type: "string", description: "Optional event key filter." },
+        limit: { type: "integer", minimum: 1, maximum: 100, description: "Maximum issues to include. Defaults to 20." },
+      },
+      additionalProperties: false,
+    },
+  };
+}
+
 function toolDescriptors() {
   return [
     spawnAgentDescriptor(),
@@ -864,6 +1104,9 @@ function toolDescriptors() {
     runIdDescriptor("spawn_agent_result", "Get the final result for an observable spawn_agent fallback job."),
     listDescriptor(),
     runIdDescriptor("spawn_agent_cancel", "Cancel a queued or running observable spawn_agent fallback job."),
+    issueRecordDescriptor(),
+    issueListDescriptor(),
+    issueReportDescriptor(),
   ];
 }
 
@@ -879,7 +1122,11 @@ function writeServerLog(entry) {
   if (process.env.SPAWN_AGENT_MCP_LOG === "0") return;
   const logPath = path.join(__dirname, "spawn_agent_server.log");
   const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
-  fs.appendFileSync(logPath, `${line}${os.EOL}`, "utf8");
+  try {
+    fs.appendFileSync(logPath, `${line}${os.EOL}`, "utf8");
+  } catch {
+    // Server telemetry must never break MCP request handling.
+  }
 }
 
 async function handleJsonRpcMessage(message, options = {}) {
@@ -922,9 +1169,9 @@ async function handleJsonRpcMessage(message, options = {}) {
   if (message.method === "tools/call") {
     const params = message.params || {};
     const registry = options.registry || defaultJobRegistry;
+    const args = params.arguments || {};
 
     try {
-      const args = params.arguments || {};
       if (params.name === "spawn_agent") {
         if (typeof args.agent_type !== "string" || typeof args.message !== "string") {
           throw new Error("spawn_agent requires string agent_type and message arguments");
@@ -974,8 +1221,35 @@ async function handleJsonRpcMessage(message, options = {}) {
       if (params.name === "spawn_agent_status") {
         if (typeof args.run_id !== "string") throw new Error("spawn_agent_status requires string run_id");
         const found = getJobOrError(registry, args.run_id);
-        if (found.error) return jsonRpcResult(message.id, found.error);
+        if (found.error) {
+          tryRecordDiagnosticIssue(registry, {
+            event: "job_not_found",
+            severity: "warning",
+            title: `spawn_agent job not found: ${args.run_id}`,
+            run_id: args.run_id,
+            tool: params.name,
+          });
+          return jsonRpcResult(message.id, found.error);
+        }
         const structured = { ok: true, ...summarizeJob(found.job, registry) };
+        if (structured.possibly_stalled && !registry.loggedStalls.has(found.job.run_id)) {
+          registry.loggedStalls.add(found.job.run_id);
+          tryRecordDiagnosticIssue(registry, {
+            event: "job_possibly_stalled",
+            severity: "warning",
+            title: `spawn_agent job possibly stalled: ${found.job.agent_type}`,
+            run_id: found.job.run_id,
+            agent_type: found.job.agent_type,
+            status: found.job.status,
+            pid: found.job.pid,
+            thread_id: found.job.thread_id,
+            cwd: found.job.cwd,
+            timeout_ms: found.job.timeout_ms,
+            idle_ms: structured.idle_ms,
+            message_preview: found.job.message_preview,
+            tool: params.name,
+          });
+        }
         return jsonRpcResult(
           message.id,
           toolResult(`spawn_agent job ${found.job.run_id} is ${found.job.status}`, structured),
@@ -985,7 +1259,16 @@ async function handleJsonRpcMessage(message, options = {}) {
       if (params.name === "spawn_agent_result") {
         if (typeof args.run_id !== "string") throw new Error("spawn_agent_result requires string run_id");
         const found = getJobOrError(registry, args.run_id);
-        if (found.error) return jsonRpcResult(message.id, found.error);
+        if (found.error) {
+          tryRecordDiagnosticIssue(registry, {
+            event: "job_not_found",
+            severity: "warning",
+            title: `spawn_agent job not found: ${args.run_id}`,
+            run_id: args.run_id,
+            tool: params.name,
+          });
+          return jsonRpcResult(message.id, found.error);
+        }
         const ready = ["completed", "failed", "timed_out", "cancelled"].includes(found.job.status);
         const structured = {
           ok: found.job.status === "completed",
@@ -1021,7 +1304,16 @@ async function handleJsonRpcMessage(message, options = {}) {
       if (params.name === "spawn_agent_cancel") {
         if (typeof args.run_id !== "string") throw new Error("spawn_agent_cancel requires string run_id");
         const found = getJobOrError(registry, args.run_id);
-        if (found.error) return jsonRpcResult(message.id, found.error);
+        if (found.error) {
+          tryRecordDiagnosticIssue(registry, {
+            event: "job_not_found",
+            severity: "warning",
+            title: `spawn_agent job not found: ${args.run_id}`,
+            run_id: args.run_id,
+            tool: params.name,
+          });
+          return jsonRpcResult(message.id, found.error);
+        }
         const cancellation = cancelJob(found.job, registry, {
           platform: options.platform,
           execFileSync: options.execFileSync,
@@ -1036,8 +1328,56 @@ async function handleJsonRpcMessage(message, options = {}) {
         );
       }
 
+      if (params.name === "spawn_agent_issue_record") {
+        const issue = recordDiagnosticIssue(registry, args);
+        return jsonRpcResult(
+          message.id,
+          toolResult(`recorded spawn_agent issue ${issue.issue_id}`, { ok: true, ...issue }),
+        );
+      }
+
+      if (params.name === "spawn_agent_issue_list") {
+        const issues = readDiagnosticIssues(registry, args);
+        return jsonRpcResult(
+          message.id,
+          toolResult(`listed ${issues.length} spawn_agent diagnostic issues`, {
+            ok: true,
+            issues,
+            log_dir: defaultIssueLogDir(registry),
+          }),
+        );
+      }
+
+      if (params.name === "spawn_agent_issue_report") {
+        const issues = readDiagnosticIssues(registry, args);
+        const markdown = buildIssueReport(issues);
+        return jsonRpcResult(
+          message.id,
+          toolResult(markdown, {
+            ok: true,
+            markdown,
+            issues,
+            log_dir: defaultIssueLogDir(registry),
+          }),
+        );
+      }
+
+      tryRecordDiagnosticIssue(registry, {
+        event: "unknown_tool",
+        severity: "warning",
+        title: `Unknown spawn_agent MCP tool: ${params.name}`,
+        tool: params.name,
+      });
       return jsonRpcError(message.id, -32602, `Unknown tool: ${params.name}`);
     } catch (error) {
+      tryRecordDiagnosticIssue(registry, {
+        event: "tool_error",
+        severity: "error",
+        title: `spawn_agent MCP tool error: ${params.name || "unknown"}`,
+        tool: params.name,
+        error: error.message,
+        agent_type: args.agent_type,
+      });
       return jsonRpcResult(message.id, {
         content: [{ type: "text", text: error.message }],
         structuredContent: { ok: false, error: error.message },

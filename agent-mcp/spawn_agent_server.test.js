@@ -38,6 +38,20 @@ function makeCodexHome() {
   return codexHome;
 }
 
+function makeLogDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "spawn-agent-logs-"));
+}
+
+function readJsonl(filePath) {
+  if (!fs.existsSync(filePath)) return [];
+  return fs
+    .readFileSync(filePath, "utf8")
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
 test("loads a registered agent definition from CODEX_HOME", () => {
   const codexHome = makeCodexHome();
 
@@ -67,6 +81,9 @@ test("lists the spawn_agent MCP tool", async () => {
     "spawn_agent_result",
     "spawn_agent_list",
     "spawn_agent_cancel",
+    "spawn_agent_issue_record",
+    "spawn_agent_issue_list",
+    "spawn_agent_issue_report",
   ]);
   assert.deepEqual(response.result.tools[0].inputSchema.required, ["agent_type", "message"]);
 });
@@ -273,10 +290,181 @@ test("spawn_agent_result reports not ready before completion and final result af
   assert.equal(finalResponse.result.structuredContent.answer, "FINAL");
 });
 
+test("spawn_agent_issue_record persists a redacted issue that can be listed and reported", async () => {
+  const logDir = makeLogDir();
+  const registry = server.createJobRegistry({
+    now: () => new Date("2026-07-07T00:00:00.000Z"),
+    logDir,
+  });
+
+  const recordResponse = await server.handleJsonRpcMessage(
+    {
+      jsonrpc: "2.0",
+      id: 33,
+      method: "tools/call",
+      params: {
+        name: "spawn_agent_issue_record",
+        arguments: {
+          event: "manual_note",
+          severity: "warning",
+          title: "Explorer returned partial output",
+          run_id: "run_000123",
+          agent_type: "explorer",
+          status: "timed_out",
+          error: "timeout after 900000ms",
+          message: "Sensitive parent prompt that should only appear as a preview ".repeat(20),
+          notes: "Need a longer timeout or smaller research scope.",
+        },
+      },
+    },
+    { registry },
+  );
+
+  assert.equal(recordResponse.result.isError, false);
+  assert.match(recordResponse.result.structuredContent.issue_id, /^issue_/);
+  assert.equal(recordResponse.result.structuredContent.status, "timed_out");
+
+  const issues = readJsonl(path.join(logDir, "issues.jsonl"));
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].title, "Explorer returned partial output");
+  assert.equal(issues[0].notes, "Need a longer timeout or smaller research scope.");
+  assert.equal(Object.prototype.hasOwnProperty.call(issues[0], "message"), false);
+  assert.match(issues[0].message_preview, /^Sensitive parent prompt/);
+  assert.ok(issues[0].message_preview.length < 300);
+
+  const listResponse = await server.handleJsonRpcMessage(
+    {
+      jsonrpc: "2.0",
+      id: 34,
+      method: "tools/call",
+      params: {
+        name: "spawn_agent_issue_list",
+        arguments: { run_id: "run_000123", limit: 5 },
+      },
+    },
+    { registry },
+  );
+
+  assert.equal(listResponse.result.structuredContent.issues.length, 1);
+  assert.equal(listResponse.result.structuredContent.issues[0].issue_id, issues[0].issue_id);
+
+  const reportResponse = await server.handleJsonRpcMessage(
+    {
+      jsonrpc: "2.0",
+      id: 35,
+      method: "tools/call",
+      params: {
+        name: "spawn_agent_issue_report",
+        arguments: { limit: 5 },
+      },
+    },
+    { registry },
+  );
+
+  assert.match(reportResponse.result.structuredContent.markdown, /# Spawn Agent Diagnostic Report/);
+  assert.match(reportResponse.result.structuredContent.markdown, /Explorer returned partial output/);
+});
+
+test("failed and timed out jobs automatically record diagnostic issues", async () => {
+  const codexHome = makeCodexHome();
+  const logDir = makeLogDir();
+  const registry = server.createJobRegistry({ logDir });
+
+  const startResponse = await server.handleJsonRpcMessage(
+    {
+      jsonrpc: "2.0",
+      id: 36,
+      method: "tools/call",
+      params: {
+        name: "spawn_agent_start",
+        arguments: {
+          agent_type: "explorer",
+          message: "This should be logged only as a short preview.",
+        },
+      },
+    },
+    {
+      codexHome,
+      registry,
+      runCodexAgent: async () => ({
+        agent_type: "explorer",
+        ok: false,
+        timed_out: true,
+        exit_code: null,
+        error: "timeout after 1000ms",
+        answer: "partial answer should not be copied into issue log",
+      }),
+    },
+  );
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const issues = readJsonl(path.join(logDir, "issues.jsonl"));
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].event, "job_timed_out");
+  assert.equal(issues[0].run_id, startResponse.result.structuredContent.run_id);
+  assert.equal(issues[0].agent_type, "explorer");
+  assert.equal(issues[0].status, "timed_out");
+  assert.equal(Object.prototype.hasOwnProperty.call(issues[0], "answer"), false);
+});
+
+test("job lookup errors are recorded in the diagnostic issue journal", async () => {
+  const logDir = makeLogDir();
+  const registry = server.createJobRegistry({ logDir });
+
+  const response = await server.handleJsonRpcMessage(
+    {
+      jsonrpc: "2.0",
+      id: 37,
+      method: "tools/call",
+      params: {
+        name: "spawn_agent_status",
+        arguments: { run_id: "run_missing" },
+      },
+    },
+    { registry },
+  );
+
+  assert.equal(response.result.isError, true);
+
+  const issues = readJsonl(path.join(logDir, "issues.jsonl"));
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].event, "job_not_found");
+  assert.equal(issues[0].run_id, "run_missing");
+  assert.equal(issues[0].tool, "spawn_agent_status");
+});
+
+test("tool argument errors are returned and recorded without crashing", async () => {
+  const logDir = makeLogDir();
+  const registry = server.createJobRegistry({ logDir });
+
+  const response = await server.handleJsonRpcMessage(
+    {
+      jsonrpc: "2.0",
+      id: 38,
+      method: "tools/call",
+      params: {
+        name: "spawn_agent_start",
+        arguments: { agent_type: "explorer" },
+      },
+    },
+    { registry },
+  );
+
+  assert.equal(response.result.isError, true);
+  assert.match(response.result.structuredContent.error, /requires string agent_type and message/);
+
+  const issues = readJsonl(path.join(logDir, "issues.jsonl"));
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].event, "tool_error");
+  assert.equal(issues[0].tool, "spawn_agent_start");
+  assert.equal(issues[0].agent_type, "explorer");
+});
+
 test("spawn_agent_status marks a running job as possibly stalled after five minutes idle", async () => {
   const codexHome = makeCodexHome();
   let nowMs = Date.parse("2026-07-07T00:00:00.000Z");
-  const registry = server.createJobRegistry({ now: () => new Date(nowMs) });
+  const registry = server.createJobRegistry({ now: () => new Date(nowMs), logDir: makeLogDir() });
   let resolveRun;
 
   const startResponse = await server.handleJsonRpcMessage(
@@ -326,7 +514,7 @@ test("spawn_agent_status marks a running job as possibly stalled after five minu
 
 test("spawn_agent_cancel cancels queued jobs and running jobs", async () => {
   const codexHome = makeCodexHome();
-  const registry = server.createJobRegistry();
+  const registry = server.createJobRegistry({ logDir: makeLogDir() });
   let resolveFirst;
   let killCalled = false;
 

@@ -36,8 +36,13 @@ For coordinating or monitoring multiple observable jobs, use the `spawn-agent-ob
 - `spawn_agent_result`: fetch the final result when ready.
 - `spawn_agent_list`: list recent jobs held in the current MCP server process.
 - `spawn_agent_cancel`: cancel a queued or running job. On Windows it attempts process-tree cleanup with `taskkill /T /PID` before falling back to direct process kill.
+- `spawn_agent_issue_record`: record a redacted fallback MCP issue or follow-up note.
+- `spawn_agent_issue_list`: list recent fallback MCP diagnostic issues.
+- `spawn_agent_issue_report`: summarize recent fallback MCP diagnostic issues as Markdown.
 
 These observable jobs are still fallback `codex exec` children, not Codex App native Sub Agents, and they do not appear in the App sidebar. Job state is in-memory only and is lost if the MCP server restarts. A running job is marked `possibly_stalled` after five minutes without stdout or stderr activity; this is only a hint, not automatic cancellation.
+
+The diagnostic journal is persistent by default under `$CODEX_HOME/spawn-agent-logs/`. If this fallback path fails, times out, returns partial output, behaves unexpectedly, or reveals a workflow gap, record a short redacted issue through `spawn_agent_issue_record` or switch to `spawn-agent-observer` for coordinated monitoring. Do not store full prompts, full answers, stdout/stderr tails, tokens, or credentials in issue notes.
 
 PowerShell example:
 

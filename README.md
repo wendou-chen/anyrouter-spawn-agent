@@ -30,8 +30,49 @@ The MCP server exposes:
 | `spawn_agent_result` | Fetch final answer and metadata when ready. |
 | `spawn_agent_list` | List recent jobs in the current MCP server process. |
 | `spawn_agent_cancel` | Cancel queued/running jobs. On Windows it tries `taskkill /T /F /PID` before `child.kill()`. |
+| `spawn_agent_issue_record` | Record a redacted diagnostic note/bug for later MCP improvement. |
+| `spawn_agent_issue_list` | List recent diagnostic issues from the persistent journal. |
+| `spawn_agent_issue_report` | Build a Markdown report from recent diagnostic issues. |
 
 `possibly_stalled` becomes true after five minutes without stdout/stderr activity. It is a warning, not automatic failure.
+
+## Diagnostic Journal
+
+The MCP fallback now has a small persistent diagnostic journal for problems discovered while using fallback jobs.
+
+Default location:
+
+```text
+$CODEX_HOME/spawn-agent-logs/issues.jsonl
+$CODEX_HOME/spawn-agent-logs/events.jsonl
+```
+
+Set `SPAWN_AGENT_LOG_DIR` to place the journal somewhere else.
+
+The journal is intentionally redacted by default. It stores metadata and short previews such as `run_id`, `agent_type`, `status`, `tool`, `error`, `timeout_ms`, `idle_ms`, and `message_preview`. It does not copy full parent prompts, final answers, stdout tails, or stderr tails unless a caller explicitly writes a short note.
+
+Issues are recorded automatically for:
+
+- `failed`, `timed_out`, and `cancelled` jobs.
+- First observation of `possibly_stalled` for a run.
+- Missing `run_id` lookups.
+- Tool argument errors and unknown tool calls.
+
+Use `spawn_agent_issue_record` manually when a fallback job behaved strangely but did not fail mechanically, for example partial research, unclear timeout behavior, missing capability, bad agent instructions, or a recurring workflow problem.
+
+Example manual issue:
+
+```json
+{
+  "event": "manual_note",
+  "severity": "warning",
+  "title": "docs_researcher returned partial source list",
+  "run_id": "run_000004",
+  "agent_type": "docs_researcher",
+  "status": "timed_out",
+  "notes": "Retry with a narrower source request or longer timeout."
+}
+```
 
 ## Repository Layout
 
@@ -89,6 +130,7 @@ Use this decision flow:
 3. For long-running, exploratory, research, review, or parallel work, use `spawn_agent_start` and keep the returned `run_id`.
 4. Use `spawn_agent_status` while the job runs and `spawn_agent_result` when it completes.
 5. Use legacy `spawn_agent` only for short one-shot requests where progress does not matter.
+6. If the fallback mechanism misbehaves or produces a partial/failed result worth improving, call `spawn_agent_issue_record` or include the automatic issue in a `spawn_agent_issue_report`.
 
 ## Example
 
@@ -142,6 +184,9 @@ spawn_agent_status
 spawn_agent_result
 spawn_agent_list
 spawn_agent_cancel
+spawn_agent_issue_record
+spawn_agent_issue_list
+spawn_agent_issue_report
 ```
 
 ## Notes

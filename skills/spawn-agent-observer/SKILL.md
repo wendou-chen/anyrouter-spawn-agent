@@ -34,6 +34,9 @@ Use these MCP tools when they are available:
 | Fetch final answer | `spawn_agent_result` |
 | See active/recent jobs | `spawn_agent_list` |
 | Stop a queued/running job | `spawn_agent_cancel` |
+| Record a fallback issue | `spawn_agent_issue_record` |
+| List fallback issues | `spawn_agent_issue_list` |
+| Summarize fallback issues | `spawn_agent_issue_report` |
 | Legacy one-shot answer | `spawn_agent` |
 
 Use `spawn_agent` only for short one-shot tasks. For long exploration, multiple agents, or anything the user may ask about while it runs, use `spawn_agent_start`.
@@ -53,6 +56,21 @@ Use `spawn_agent` only for short one-shot tasks. For long exploration, multiple 
    - If ready, record `status`, `thread_id`, `answer`, `stderr_tail`, and `raw_event_count`.
 4. Use `spawn_agent_list` when you lost the ledger or need a quick snapshot of recent jobs in the current MCP server process.
 5. Use `spawn_agent_cancel` only when the user asks to stop, the task is obsolete, or the job is clearly stuck and continuing is harmful.
+6. Use the diagnostic journal when MCP behavior is worth improving:
+   - Call `spawn_agent_issue_record` for partial results, confusing output, repeated stalls, bad timeout fit, missing capability, agent instruction gaps, or unexpected tool errors.
+   - Use `spawn_agent_issue_list` before debugging a repeated MCP problem.
+   - Use `spawn_agent_issue_report` when summarizing recurring issues or planning fixes.
+
+Automatic issue records may already exist for failed, timed out, cancelled, first `possibly_stalled`, missing `run_id`, unknown tool, and argument-error cases. Do not duplicate them unless you have useful extra context.
+
+## Diagnostic Journal Semantics
+
+The journal is fallback-only observability, not native App Sub Agent telemetry. It writes redacted JSONL under `$CODEX_HOME/spawn-agent-logs/` by default:
+
+- `issues.jsonl`: persistent problem records for later improvement.
+- `events.jsonl`: lightweight journal events.
+
+Issue records should be short and safe. Prefer metadata, summaries, and short previews. Do not paste full prompts, full answers, stdout tails, stderr tails, API keys, bearer tokens, or private credentials into `notes`.
 
 ## Status Semantics
 
@@ -91,3 +109,4 @@ Do not present main-thread reading as a subagent result.
 - Do not wait silently on long jobs. Poll and report meaningful status when asked.
 - Do not treat `possibly_stalled` as failure by itself.
 - Do not mark fallback success as native App SubAgent success.
+- Do not ignore MCP defects after noticing them. Record them with `spawn_agent_issue_record` so future fixes have evidence.

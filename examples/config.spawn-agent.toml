@@ -39,5 +39,5 @@ command = 'C:\Program Files\nodejs\node.exe'
 args = ['C:\Users\<you>\.codex\agent-mcp\spawn_agent_server.js']
 startup_timeout_sec = 120
 enabled = true
-enabled_tools = ["spawn_agent", "spawn_agent_start", "spawn_agent_status", "spawn_agent_result", "spawn_agent_list", "spawn_agent_cancel"]
+enabled_tools = ["spawn_agent", "spawn_agent_start", "spawn_agent_status", "spawn_agent_result", "spawn_agent_list", "spawn_agent_cancel", "spawn_agent_issue_record", "spawn_agent_issue_list", "spawn_agent_issue_report"]
 default_tools_approval_mode = "approve"

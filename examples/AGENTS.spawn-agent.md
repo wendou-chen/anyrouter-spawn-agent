@@ -7,3 +7,6 @@
 - Do not call fallback jobs App native Sub Agents. They are detached `codex exec` children and do not appear in the App sidebar.
 - Treat `possibly_stalled` as a warning only. A fallback job is complete only when status is `completed`, `failed`, `timed_out`, or `cancelled`.
 - Do not present main-thread work as subagent output. Separate completed subagent results, partial subagent results, and main-thread synthesis.
+- When the fallback MCP misbehaves, times out, returns partial output, exposes a missing capability, or creates a repeated workflow problem, record a redacted diagnostic issue with `spawn_agent_issue_record`.
+- Before debugging recurring fallback MCP problems, inspect `spawn_agent_issue_list` or generate `spawn_agent_issue_report`.
+- Do not put full prompts, full answers, stdout/stderr tails, tokens, or credentials in diagnostic issue notes.
