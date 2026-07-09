@@ -5,9 +5,10 @@
   "description": "Observable spawn_agent MCP fallback for Codex sessions where AnyRouter/API routing hides native Sub Agents.",
   "type": "commonjs",
   "scripts": {
-    "test": "node --test agent-mcp/spawn_agent_server.test.js agent-mcp/write_development_report.test.js",
-    "check": "node --check agent-mcp/spawn_agent_server.js && node --check agent-mcp/write_development_report.js && node --check skills/spawn-agent/scripts/write_development_report.js",
-    "report:issues": "node skills/spawn-agent/scripts/write_development_report.js"
+    "test": "node --test agent-mcp/spawn_agent_server.test.js agent-mcp/write_development_report.test.js agent-mcp/diagnose_tool_exposure.test.js",
+    "check": "node --check agent-mcp/spawn_agent_server.js && node --check agent-mcp/write_development_report.js && node --check agent-mcp/diagnose_tool_exposure.js && node --check skills/spawn-agent/scripts/write_development_report.js && node --check skills/spawn-agent/scripts/diagnose_tool_exposure.js",
+    "report:issues": "node skills/spawn-agent/scripts/write_development_report.js",
+    "diagnose:tools": "node skills/spawn-agent/scripts/diagnose_tool_exposure.js"
   },
   "engines": {
     "node": ">=18"

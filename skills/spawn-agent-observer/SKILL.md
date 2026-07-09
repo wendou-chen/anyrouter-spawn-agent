@@ -27,6 +27,16 @@ Use `spawn_agent_start` by default when any of these are true:
 
 Use legacy synchronous `spawn_agent` only for short one-shot checks where status will not matter, such as asking one agent to return a fixed token.
 
+Before observable fallback work, verify the active model tool surface actually includes `spawn_agent_start`, `spawn_agent_status`, and `spawn_agent_result`, or their prefixed forms such as `mcp__spawn_agent__spawn_agent_start`. A direct MCP `tools/list` check proves the server schema only; it does not prove the current model can call those tools.
+
+If the active model tool surface lacks the observable tools, do not silently start long or parallel subagents through shell-launched `codex exec`. Run:
+
+```powershell
+node "$env:USERPROFILE\.codex\skills\spawn-agent\scripts\diagnose_tool_exposure.js" --visible-tools <comma-separated-visible-tools> --write-issue --write-report
+```
+
+Then report the diagnosis to the human and stop unless the human explicitly accepts unobservable fallback.
+
 ## Tool Surface
 
 Use these MCP tools when they are available:
@@ -117,6 +127,8 @@ Do not present main-thread reading as a subagent result.
 - Do not wait silently on long jobs. Poll and report meaningful status when asked.
 - Do not treat `possibly_stalled` as failure by itself.
 - Do not mark fallback success as native App SubAgent success.
+- Do not treat raw MCP `tools/list` success as proof that the active model can call `spawn_agent_start/status/result`.
+- Do not silently downgrade to unobservable shell fallback when observable MCP tools are absent.
 - Do not ignore MCP defects after noticing them. Record them with `spawn_agent_issue_record` so future fixes have evidence.
 - Do not ignore `journal_review_due: true`. It means the main Agent should inspect the issue journal and tell the human what should be improved.
 - Do not leave journal review findings only in chat. Write them to `development/*.md` using the report writer script.

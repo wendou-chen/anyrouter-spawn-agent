@@ -3,6 +3,8 @@
 - Prefer Codex App native Sub Agent tools when they are visible, supported, and verifiable.
 - Use this repository's MCP fallback only when native Sub Agent tools are unavailable, hidden by API/provider mode, or cannot be verified.
 - For fallback `codex exec` subagents, long tasks, exploration, research, review, multiple agents, or any task where progress/status may matter must use `spawn_agent_start`, record `run_id`, poll with `spawn_agent_status`, and fetch final output with `spawn_agent_result`.
+- Before starting observable fallback work, confirm the active model tool surface contains `spawn_agent_start`, `spawn_agent_status`, and `spawn_agent_result` or their prefixed forms such as `mcp__spawn_agent__spawn_agent_start`.
+- If those observable tools are absent, do not silently downgrade to unobservable shell-launched `codex exec` for long or parallel work. Run `node "$env:USERPROFILE\.codex\skills\spawn-agent\scripts\diagnose_tool_exposure.js" --visible-tools <comma-separated-visible-tools> --write-issue --write-report`, report the diagnosis, and stop unless the user explicitly accepts unobservable fallback.
 - Use legacy synchronous `spawn_agent` only for short one-shot fixed-response checks.
 - Do not call fallback jobs App native Sub Agents. They are detached `codex exec` children and do not appear in the App sidebar.
 - Treat `possibly_stalled` as a warning only. A fallback job is complete only when status is `completed`, `failed`, `timed_out`, or `cancelled`.

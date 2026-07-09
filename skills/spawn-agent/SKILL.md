@@ -9,6 +9,8 @@ description: Use only for short one-shot detached codex exec fallback launcher r
 
 Use this skill only as a fallback launcher for detached child `codex exec` sessions. Do not use it for Codex app native Sub Agent/sidebar workflows, because detached `codex exec` sessions are not attached to the app's parent/subagent UI.
 
+Do not use this skill as a silent replacement for missing observable MCP tools. If long, parallel, exploratory, research, review, stalled, timeout, or cancellation-sensitive work cannot see `spawn_agent_start`, `spawn_agent_status`, and `spawn_agent_result` in the active model tool surface, run `node "$env:USERPROFILE\.codex\skills\spawn-agent\scripts\diagnose_tool_exposure.js" --visible-tools <comma-separated-visible-tools> --write-issue --write-report`, report the diagnosis, and stop unless the human explicitly accepts unobservable fallback.
+
 Registered agents:
 - `explorer`: read-only path, config, command, and execution-flow exploration.
 - `reviewer`: read-only correctness, security, regression, and test-gap review.
@@ -66,6 +68,7 @@ node 'C:\Users\admin\.codex\skills\spawn-agent\scripts\invoke_spawn_agent.js' --
 ## Notes
 
 - The native `spawn_agent` tool and external MCP tools may not appear in API-key `codex exec` sessions even when MCP `tools/list` succeeds. This skill is the fallback execution path.
+- A direct MCP `tools/list` check proves server schema only; it does not prove the active model can call observable tools. Check raw and prefixed names such as `spawn_agent_start` and `mcp__spawn_agent__spawn_agent_start`.
 - Registered fallback agents must exist in `$CODEX_HOME/config.toml`, and their `config_file` must resolve inside `$CODEX_HOME`.
 - Child `codex exec` sessions should inherit the parent workspace cwd so project files stay readable under sandbox policy.
 - The default child execution timeout is 15 minutes; use `--timeout-ms` only when a task needs a shorter or longer bound.
